@@ -8,34 +8,17 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.camera.core.CameraSelector
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.runtime.Composable
 import androidx.core.content.ContextCompat
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import dagger.hilt.android.AndroidEntryPoint
-import online.ship10x.bevi_bestview.composables.BeviBottomSheet
+import online.ship10x.bevi_bestview.composables.CameraScreen
 import online.ship10x.bevi_bestview.composables.MainScreen
 import online.ship10x.bevi_bestview.ui.theme.BeViBestViewTheme
+import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -43,13 +26,15 @@ import java.util.concurrent.Executors
 class MainActivity : ComponentActivity() {
 
     private val imageProcessingViewModel: ImageProcessingViewModel by viewModels()
-    private lateinit var cameraExecutor: ExecutorService  // Changed from Executor to ExecutorService
+    private lateinit var outputDirectory: File
+    private lateinit var cameraExecutor: ExecutorService
+    private lateinit var navController: NavHostController
 
     private val cameraPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            openCamera()
+            navigateToCamera()
         } else {
             // Handle permission denied
         }
@@ -57,11 +42,30 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        outputDirectory = getOutputDirectory()
         cameraExecutor = Executors.newSingleThreadExecutor()
         enableEdgeToEdge()
         setContent {
             BeViBestViewTheme {
-                MainScreen(::checkAndRequestCameraPermission)
+                navController = rememberNavController()
+                AppNavigation(navController)
+            }
+        }
+    }
+
+    @Composable
+    fun AppNavigation(navController: NavHostController) {
+        NavHost(navController = navController, startDestination = "main") {
+            composable("main") {
+                MainScreen(onOpenCamera = { checkAndRequestCameraPermission() })
+            }
+            composable("camera") {
+                CameraScreen(
+                    outputDirectory = outputDirectory,
+                    executor = cameraExecutor,
+                    onImageCaptured = { /* Handle captured image */ },
+                    onError = { /* Handle error */ }
+                )
             }
         }
     }
@@ -72,7 +76,7 @@ class MainActivity : ComponentActivity() {
                 this,
                 Manifest.permission.CAMERA
             ) == PackageManager.PERMISSION_GRANTED -> {
-                openCamera()
+                navigateToCamera()
             }
             else -> {
                 cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
@@ -80,9 +84,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun openCamera() {
-        val intent = android.content.Intent(this, CameraActivity::class.java)
-        startActivity(intent)
+    private fun navigateToCamera() {
+        navController.navigate("camera")
+    }
+
+    private fun getOutputDirectory(): File {
+        val mediaDir = externalMediaDirs.firstOrNull()?.let {
+            File(it, resources.getString(R.string.app_name)).apply { mkdirs() }
+        }
+        return if (mediaDir != null && mediaDir.exists())
+            mediaDir else filesDir
     }
 
     override fun onDestroy() {

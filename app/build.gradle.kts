@@ -12,7 +12,7 @@ android {
 
     defaultConfig {
         applicationId = "online.ship10x.bevi_bestview"
-        minSdk = 21
+        minSdk = 24
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -75,6 +75,13 @@ dependencies {
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
+
+
+    //media pipe
+    implementation(libs.tasks.vision)
+
+    implementation(libs.androidx.navigation.compose)
+
 
 }
 // Allow references to generated code
