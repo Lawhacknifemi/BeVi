@@ -64,7 +64,8 @@ class MainActivity : ComponentActivity() {
                     outputDirectory = outputDirectory,
                     executor = cameraExecutor,
                     onImageCaptured = { /* Handle captured image */ },
-                    onError = { /* Handle error */ }
+                    onError = { /* Handle error */ },
+                    onBackPressed = { navController.popBackStack() }
                 )
             }
         }

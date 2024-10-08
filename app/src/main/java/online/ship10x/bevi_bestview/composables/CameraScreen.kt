@@ -1,133 +1,151 @@
 package online.ship10x.bevi_bestview.composables
 
+import android.content.Context
 import android.net.Uri
-import androidx.activity.ComponentActivity
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.Preview
+import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.google.mediapipe.tasks.vision.core.RunningMode
+import online.ship10x.bevi_bestview.ObjectDetectorHelper
+import online.ship10x.bevi_bestview.ObjectDetectorListener
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Locale
 import java.util.concurrent.Executor
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 @Composable
 fun CameraScreen(
     outputDirectory: File,
     executor: Executor,
     onImageCaptured: (Uri) -> Unit,
-    onError: (ImageCaptureException) -> Unit
+    onError: (ImageCaptureException) -> Unit,
+    onBackPressed: () -> Unit
 ) {
-    var showSpotlight by remember { mutableStateOf(true) }
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    var showSpotlight by remember { mutableStateOf(true) }
+    var detectionResults by remember { mutableStateOf<ObjectDetectorHelper.ResultBundle?>(null) }
+
+    val preview = Preview.Builder().build()
+    val previewView = remember { PreviewView(context) }
+    val imageCapture: ImageCapture = remember { ImageCapture.Builder().build() }
+    val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+    val objectDetectorHelper = remember {
+        ObjectDetectorHelper(
+            context = context,
+            threshold = 0.5f,
+            maxResults = 3,
+            currentDelegate = ObjectDetectorHelper.DELEGATE_CPU,
+            currentModel = ObjectDetectorHelper.MODEL_EFFICIENTDETV0,
+            runningMode = RunningMode.LIVE_STREAM,
+            objectDetectorListener = ObjectDetectorListener(
+                onErrorCallback = { error, _ ->
+                    // Handle error
+                    println("Object Detection Error: $error")
+                },
+                onResultsCallback = { resultBundle ->
+                    detectionResults = resultBundle
+                }
+            )
+        )
+    }
+
+    LaunchedEffect(Unit) {
+        val cameraProvider = context.getCameraProvider()
+        cameraProvider.unbindAll()
+        cameraProvider.bindToLifecycle(
+            lifecycleOwner,
+            cameraSelector,
+            preview,
+            imageCapture,
+            ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+                .also { imageAnalysis ->
+                    imageAnalysis.setAnalyzer(executor) { imageProxy ->
+                        objectDetectorHelper.detectLivestreamFrame(imageProxy)
+                    }
+                }
+        )
+
+        preview.setSurfaceProvider(previewView.surfaceProvider)
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        CameraViewPreview(modifier = Modifier.fillMaxSize())
+        AndroidView({ previewView }, modifier = Modifier.fillMaxSize())
 
         if (showSpotlight) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(20.dp)
-                    .background(Color.Black.copy(alpha = 0.6f))
-            )
             SpotlightView(
                 modifier = Modifier.fillMaxSize(),
                 onStartClick = { showSpotlight = false }
             )
         } else {
-            CameraControls(
-                outputDirectory = outputDirectory,
-                executor = executor,
-                onImageCaptured = onImageCaptured,
-                onError = onError,
-                onBackPressed = { (context as? ComponentActivity)?.finish() }
-            )
+            detectionResults?.let { results ->
+                results.results.firstOrNull()?.let { result ->
+                    ResultsOverlay(
+                        results = result,
+                        frameWidth = results.inputImageWidth,
+                        frameHeight = results.inputImageHeight
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onBackPressed,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(16.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color.White
+                )
+            }
+
+            Button(
+                onClick = {
+                    takePhoto(
+                        filenameFormat = "yyyy-MM-dd-HH-mm-ss-SSS",
+                        imageCapture = imageCapture,
+                        outputDirectory = outputDirectory,
+                        executor = executor,
+                        onImageCaptured = onImageCaptured,
+                        onError = onError
+                    )
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 16.dp)
+            ) {
+                Text("Capture")
+            }
         }
     }
-}
-
-@Composable
-fun CameraViewPreview(modifier: Modifier = Modifier) {  // Renamed from CameraPreview to CameraViewPreview
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val context = LocalContext.current
-    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
-
-    AndroidView(
-        factory = { ctx ->
-            val previewView = PreviewView(ctx).apply {
-                this.scaleType = PreviewView.ScaleType.FILL_CENTER
-            }
-            val executor = ContextCompat.getMainExecutor(ctx)
-            cameraProviderFuture.addListener({
-                val cameraProvider = cameraProviderFuture.get()
-                val preview = Preview.Builder().build().also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
-                }
-
-                val cameraSelector = CameraSelector.Builder()
-                    .requireLensFacing(CameraSelector.LENS_FACING_BACK)
-                    .build()
-
-                try {
-                    cameraProvider.unbindAll()
-                    cameraProvider.bindToLifecycle(
-                        lifecycleOwner,
-                        cameraSelector,
-                        preview
-                    )
-                } catch (exc: Exception) {
-                    // Log.e("CameraPreview", "Use case binding failed", exc)
-                }
-            }, executor)
-            previewView
-        },
-        modifier = modifier
-    )
 }
 
 @Composable
@@ -182,58 +200,7 @@ fun PulsatingCircle() {
             .scale(scale)
             .clip(CircleShape)
             .background(Color.White.copy(alpha = 0.2f))
-            .border(2.dp, Color.White, CircleShape)
     )
-}
-
-@Composable
-fun CameraControls(
-    outputDirectory: File,
-    executor: Executor,
-    onImageCaptured: (Uri) -> Unit,
-    onError: (ImageCaptureException) -> Unit,
-    onBackPressed: () -> Unit  // Add this parameter
-) {
-    Box(contentAlignment = Alignment.BottomCenter, modifier = Modifier.fillMaxSize()) {
-        IconButton(
-            modifier = Modifier.padding(bottom = 20.dp),
-            onClick = {
-                takePhoto(
-                    filenameFormat = "yyyy-MM-dd-HH-mm-ss-SSS",
-                    imageCapture = ImageCapture.Builder().build(),
-                    outputDirectory = outputDirectory,
-                    executor = executor,
-                    onImageCaptured = onImageCaptured,
-                    onError = onError
-                )
-            },
-            content = {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Take picture",
-                    tint = Color.White,
-                    modifier = Modifier
-                        .size(100.dp)
-                        .padding(1.dp)
-                        .border(1.dp, Color.White, CircleShape)
-                )
-            }
-        )
-
-        IconButton(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(16.dp),
-            onClick = onBackPressed,  // Use the new parameter here
-            content = {
-                Icon(
-                    imageVector = Icons.Default.ArrowBack,
-                    contentDescription = "Go back",
-                    tint = Color.White
-                )
-            }
-        )
-    }
 }
 
 private fun takePhoto(
@@ -246,23 +213,28 @@ private fun takePhoto(
 ) {
     val photoFile = File(
         outputDirectory,
-        SimpleDateFormat(filenameFormat, Locale.US).format(System.currentTimeMillis()) + ".jpg"
+        java.text.SimpleDateFormat(filenameFormat, java.util.Locale.US)
+            .format(System.currentTimeMillis()) + ".jpg"
     )
 
     val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
 
-    imageCapture.takePicture(
-        outputOptions,
-        executor,
-        object : ImageCapture.OnImageSavedCallback {
-            override fun onError(exception: ImageCaptureException) {
-                onError(exception)
-            }
-
-            override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                val savedUri = Uri.fromFile(photoFile)
-                onImageCaptured(savedUri)
-            }
+    imageCapture.takePicture(outputOptions, executor, object : ImageCapture.OnImageSavedCallback {
+        override fun onError(exception: ImageCaptureException) {
+            onError(exception)
         }
-    )
+
+        override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+            val savedUri = Uri.fromFile(photoFile)
+            onImageCaptured(savedUri)
+        }
+    })
+}
+
+suspend fun Context.getCameraProvider(): ProcessCameraProvider = suspendCoroutine { continuation ->
+    ProcessCameraProvider.getInstance(this).also { cameraProvider ->
+        cameraProvider.addListener({
+            continuation.resume(cameraProvider.get())
+        }, ContextCompat.getMainExecutor(this))
+    }
 }
