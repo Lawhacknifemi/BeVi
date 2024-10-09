@@ -15,9 +15,10 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import online.ship10x.bevi_bestview.R
+import android.net.Uri
 
 @Composable
-fun MainScreen(onOpenCamera: () -> Unit) {
+fun MainScreen(onOpenCamera: () -> Unit, onImageSelected: (Uri) -> Unit, onOpenLatest: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize()) {
         // Background with logo
         Box(
@@ -50,7 +51,7 @@ fun MainScreen(onOpenCamera: () -> Unit) {
                 .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
                 .background(Color.White)
         ) {
-            BeviBottomSheet(onOpenCamera = onOpenCamera)
+            BeviBottomSheet(onOpenCamera = onOpenCamera, onImageSelected = onImageSelected, onOpenLatest = onOpenLatest)
         }
     }
 }

@@ -75,12 +75,15 @@ dependencies {
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
-    implementation("androidx.camera:camera-core:${libs.versions.camerax.get()}")
+    implementation(libs.androidx.camera.core)
 
     //media pipe
     implementation(libs.tasks.vision)
 
     implementation(libs.androidx.navigation.compose)
+
+    implementation (libs.coil.compose.v240)
+
 
 
 }
